@@ -20,12 +20,6 @@ import (
 	"go.uber.org/zap"
 )
 
-type matchParams struct {
-	req           *http.Request
-	reqBodyIsJSON bool
-	reqBuf        []byte
-}
-
 // Decodes the mocks in test mode so that they can be sent to the user application.
 func decodeHTTP(ctx context.Context, logger *zap.Logger, reqBuf []byte, clientConn net.Conn, dstCfg *integrations.ConditionalDstCfg, mockDb integrations.MockMemDb, opts models.OutgoingOptions) error {
 	errCh := make(chan error, 1)
@@ -84,31 +78,32 @@ func decodeHTTP(ctx context.Context, logger *zap.Logger, reqBuf []byte, clientCo
 				return
 			}
 
-			//check if reqBuf body is a json
-
-			param := &matchParams{
-				req:           request,
-				reqBodyIsJSON: isJSON(reqBody),
-				reqBuf:        reqBuf,
+			input := &req{
+				method: request.Method,
+				url:    request.URL,
+				header: request.Header,
+				body:   reqBody,
+				raw:    reqBuf,
 			}
-			ok, stub, err := match(ctx, logger, param, mockDb)
+			ok, stub, err := match(ctx, logger, input, mockDb)
 			if err != nil {
 				utils.LogError(logger, err, "error while matching http mocks", zap.Any("metadata", getReqMeta(request)))
 				errCh <- err
 				return
 			}
-			logger.Debug("after matching the http request", zap.Any("isMatched", match), zap.Any("stub", stub), zap.Error(err))
+			logger.Debug("after matching the http request", zap.Any("isMatched", ok), zap.Any("stub", stub), zap.Error(err))
 
 			if !ok {
 				if !isPassThrough(logger, request, dstCfg.Port, opts) {
 					utils.LogError(logger, nil, "Didn't match any preExisting http mock", zap.Any("metadata", getReqMeta(request)))
 				}
-
-				_, err = pUtil.PassThrough(ctx, logger, clientConn, dstCfg, [][]byte{reqBuf})
-				if err != nil {
-					utils.LogError(logger, err, "failed to passThrough http request", zap.Any("metadata", getReqMeta(request)))
-					errCh <- err
-					return
+				if opts.FallBackOnMiss {
+					_, err = pUtil.PassThrough(ctx, logger, clientConn, dstCfg, [][]byte{reqBuf})
+					if err != nil {
+						utils.LogError(logger, err, "failed to passThrough http request", zap.Any("metadata", getReqMeta(request)))
+						errCh <- err
+						return
+					}
 				}
 				errCh <- nil
 				return

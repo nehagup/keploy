@@ -11,9 +11,11 @@ import (
 	"time"
 
 	"github.com/fatih/color"
+	"github.com/moby/moby/pkg/parsers/kernel"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"go.keploy.io/server/v2/config"
+	"go.keploy.io/server/v2/pkg/models"
 	"go.keploy.io/server/v2/utils"
 	"go.keploy.io/server/v2/utils/log"
 	"go.uber.org/zap"
@@ -210,14 +212,16 @@ func (c *CmdConfigurator) AddFlags(cmd *cobra.Command) error {
 			cmd.Flags().StringP("language", "l", c.cfg.Test.Language, "application programming language")
 			cmd.Flags().Bool("ignoreOrdering", c.cfg.Test.IgnoreOrdering, "Ignore ordering of array in response")
 			cmd.Flags().Bool("coverage", c.cfg.Test.Coverage, "Enable coverage reporting for the testcases. for golang please set language flag to golang, ref https://keploy.io/docs/server/sdk-installation/go/")
-			cmd.Flags().Bool("removeUnusedMocks", false, "Clear the unused mocks for the passed test-sets")
+			cmd.Flags().Bool("removeUnusedMocks", c.cfg.Test.RemoveUnusedMocks, "Clear the unused mocks for the passed test-sets")
 			cmd.Flags().Bool("goCoverage", c.cfg.Test.GoCoverage, "Enable go coverage reporting for the testcases")
+			cmd.Flags().Bool("fallBackOnMiss", c.cfg.Test.FallBackOnMiss, "Enable connecting to actual service if mock not found during test mode")
 		} else {
 			cmd.Flags().Uint64("recordTimer", 0, "User provided time to record its application")
 		}
 	case "keploy":
 		cmd.PersistentFlags().Bool("debug", c.cfg.Debug, "Run in debug mode")
 		cmd.PersistentFlags().Bool("disableTele", c.cfg.DisableTele, "Run in telemetry mode")
+		cmd.PersistentFlags().Bool("disableANSI", c.cfg.DisableANSI, "Disable ANSI color in logs")
 		err = cmd.PersistentFlags().MarkHidden("disableTele")
 		if err != nil {
 			errMsg := "failed to mark telemetry as hidden flag"
@@ -235,6 +239,18 @@ func (c *CmdConfigurator) AddFlags(cmd *cobra.Command) error {
 		return errors.New("unknown command name")
 	}
 	return nil
+}
+
+func (c *CmdConfigurator) Validate(ctx context.Context, cmd *cobra.Command) error {
+	//check if the version of the kernel is above 5.15 for eBPF support
+	isValid := kernel.CheckKernelVersion(5, 15, 0)
+	if !isValid {
+		errMsg := "Kernel version is below 5.15. Keploy requires kernel version 5.15 or above"
+		utils.LogError(c.logger, nil, errMsg)
+		return errors.New(errMsg)
+	}
+
+	return c.ValidateFlags(ctx, cmd)
 }
 
 func (c *CmdConfigurator) ValidateFlags(ctx context.Context, cmd *cobra.Command) error {
@@ -301,6 +317,17 @@ func (c *CmdConfigurator) ValidateFlags(ctx context.Context, cmd *cobra.Command)
 			return errors.New(errMsg)
 		}
 		c.cfg.DisableTele = true
+	}
+
+	if c.cfg.DisableANSI {
+		logger, err := log.ChangeColorEncoding()
+		*c.logger = *logger
+		if err != nil {
+			errMsg := "failed to change color encoding"
+			utils.LogError(c.logger, err, errMsg)
+			return errors.New(errMsg)
+		}
+		c.logger.Info("Color encoding is disabled")
 	}
 
 	c.logger.Debug("config has been initialised", zap.Any("for cmd", cmd.Name()), zap.Any("config", c.cfg))
@@ -387,6 +414,14 @@ func (c *CmdConfigurator) ValidateFlags(ctx context.Context, cmd *cobra.Command)
 
 		c.cfg.Path = absPath + "/keploy"
 		if cmd.Name() == "test" {
+			//check if the keploy folder exists
+			if _, err := os.Stat(c.cfg.Path); os.IsNotExist(err) {
+				recordCmd := models.HighlightGrayString("keploy record")
+				errMsg := fmt.Sprintf("No test-sets found. Please record testcases using %s command", recordCmd)
+				utils.LogError(c.logger, nil, errMsg)
+				return errors.New(errMsg)
+			}
+
 			testSets, err := cmd.Flags().GetStringSlice("testsets")
 			if err != nil {
 				errMsg := "failed to get the testsets"

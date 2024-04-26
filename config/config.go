@@ -13,6 +13,7 @@ type Config struct {
 	ProxyPort             uint32        `json:"proxyPort" yaml:"proxyPort" mapstructure:"proxyPort"`
 	Debug                 bool          `json:"debug" yaml:"debug" mapstructure:"debug"`
 	DisableTele           bool          `json:"disableTele" yaml:"disableTele" mapstructure:"disableTele"`
+	DisableANSI           bool          `json:"disableANSI" yaml:"disableANSI" mapstructure:"disableANSI"`
 	InDocker              bool          `json:"inDocker" yaml:"inDocker" mapstructure:"inDocker"`
 	ContainerName         string        `json:"containerName" yaml:"containerName" mapstructure:"containerName"`
 	NetworkName           string        `json:"networkName" yaml:"networkName" mapstructure:"networkName"`
@@ -57,6 +58,7 @@ type Test struct {
 	MongoPassword      string              `json:"mongoPassword" yaml:"mongoPassword" mapstructure:"mongoPassword"`
 	Language           string              `json:"language" yaml:"language" mapstructure:"language"`
 	RemoveUnusedMocks  bool                `json:"removeUnusedMocks" yaml:"removeUnusedMocks" mapstructure:"removeUnusedMocks"`
+	FallBackOnMiss     bool                `json:"fallBackOnMiss" yaml:"fallBackOnMiss" mapstructure:"fallBackOnMiss"`
 }
 
 type Globalnoise struct {
